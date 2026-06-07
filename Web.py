@@ -121,7 +121,7 @@ if st.sidebar.button('Predict'):
         st.subheader('Predicted probability of GR to nCRT')
         st.markdown(
             f'<span style="color:red; font-size:30px;">'
-            f'Predicted probability: {prediction:.8f}'
+            f'Predicted probability of GR to nCRT; Predicted probability: {prediction:.8f}'
             f'</span>',
             unsafe_allow_html=True
         )
@@ -141,7 +141,7 @@ if st.sidebar.button('Predict'):
             input_df.iloc[0, :],
             feature_names=feature_label,
             matplotlib=True,
-            contribution_threshold=0.1,
+            contribution_threshold=0.3,
             show=False
         )
 
