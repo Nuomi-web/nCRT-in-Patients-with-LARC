@@ -141,7 +141,7 @@ if st.sidebar.button('Predict'):
             input_df.iloc[0, :],
             feature_names=feature_label,
             matplotlib=True,
-            contribution_threshold=0.125,
+            contribution_threshold=0.13,
             show=False
         )
 
