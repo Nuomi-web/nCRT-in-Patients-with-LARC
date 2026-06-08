@@ -3,14 +3,20 @@ import joblib
 import pandas as pd
 import numpy as np
 import shap
-import xgboost as xgb
 import matplotlib.pyplot as plt
 
-# 1. Load model
-model_xgb = joblib.load('RF.pkl')
+# =========================
+# 1. Load RF model
+# =========================
+@st.cache_resource
+def load_model():
+    return joblib.load('RF.pkl')
 
+model_rf = load_model()
+
+# =========================
 # 2. Configure feature names
-# 特征顺序必须与模型训练时完全一致
+# =========================
 feature_label = [
     'IC_wavelet-LHL_glcm_ClusterShade_h1',
     'PEI_DL_11',
@@ -34,69 +40,42 @@ feature_label = [
     'Differentiation'
 ]
 
-# 3. Default values
-# 最后一个 Differentiation 是临床二分类变量：
-# 0 = Well/Moderate
-# 1 = Poor
-default_values = [
-    1.02989367,
-    1.681772972,
-    2.107408721,
-    0.5782**616,
-    0.916627446,
-    1.557858735,
-    0.366022396,
-    3.35410914,
-    2.150222055,
-    0.773485096,
-    3.3759809,
-    8.813182328,
-    7.751701335,
-    5.403969299,
-    4.407647692,
-    -1.606873453,
-    -0.321764867,
-    1.194331593,
-    10.20636933,
-    0
-]
+default_values =  [ 1.02989367, 1.681772972, 2.107408721, 0.5782616, 0.916627446, 1.557858735, 0.366022396, 3.35410914, 2.150222055, 0.773485096, 3.3759809, 8.813182328, 7.751701335, 5.403969299, 4.4077692, -1.606873453, -0.3217**867, 1.194331593, 10.20636933, 0 ]
 
+# =========================
 # 4. Streamlit input
+# =========================
 st.title('Web Predictor for GR to nCRT in Patients with LARC')
 st.sidebar.header('Input Features')
 
-# Input feature form
 inputs = {}
 
 for i, feature in enumerate(feature_label):
     default_val = default_values[i]
 
     if feature == 'Differentiation':
-        # Categorical variable
-        # 0 = Well/Moderate, 1 = Poor
         options = ['Well/Moderate', 'Poor']
 
-        if int(default_val) == 0:
-            default_index = 0
-        else:
-            default_index = 1
+        default_index = 0 if int(default_val) == 0 else 1
 
         inputs[feature] = st.sidebar.radio(
-            feature,
+            label=feature,
             options=options,
             index=default_index
         )
 
     else:
         inputs[feature] = st.sidebar.number_input(
-            feature,
+            label=feature,
             min_value=-20.0,
             max_value=30.0,
             value=round(float(default_val), 8),
             format="%.8f"
         )
 
-# 5. Map categorical variable to numerical value
+# =========================
+# 5. Map categorical variable
+# =========================
 diff_map = {
     'Well/Moderate': 0,
     'Poor': 1
@@ -104,41 +83,115 @@ diff_map = {
 
 inputs['Differentiation'] = diff_map[inputs['Differentiation']]
 
-# 6. Convert input values into a Pandas DataFrame
-# 注意：DataFrame 的列顺序必须与 feature_label 一致
+# =========================
+# 6. Convert to DataFrame
+# =========================
 input_df = pd.DataFrame([inputs], columns=feature_label)
 
-# 7. Prediction button
+# 显示输入数据，可选
+st.subheader("Input Data")
+st.dataframe(input_df)
+
+# =========================
+# 7. Prediction and SHAP
+# =========================
 if st.sidebar.button('Predict'):
+
     try:
-        # Convert to XGBoost DMatrix
-        input_data = xgb.DMatrix(input_df)
+        # =========================
+        # 7-1. RF prediction
+        # =========================
+        if not hasattr(model_rf, "predict_proba"):
+            raise TypeError(
+                "当前加载的模型不支持 predict_proba，请确认 RF.pkl 是 RandomForestClassifier 分类模型。"
+            )
 
-        # Prediction
-        prediction = model_xgb.predict(input_data)[0]
+        # 预测类别 1，即 GR to nCRT 的概率
+        prediction_prob = model_rf.predict_proba(input_df)[0, 1]
 
-        # Display prediction result
-        st.subheader('Predicted probability of GR to nCRT')
+        # 根据 0.5 阈值得到预测类别
+        threshold = 0.5
+        prediction_class = int(prediction_prob >= threshold)
+
+        # =========================
+        # 7-2. Display prediction
+        # =========================
+        st.subheader('Prediction Result')
+
         st.markdown(
-            f'<span style="color:red; font-size:30px;">'
-            f'Predicted probability of GR to nCRT; Predicted probability: {prediction:.8f}'
-            f'</span>',
+            f"""
+            <div style="font-size:24px;">
+                Predicted probability of <b>GR to nCRT</b>:
+                <span style="color:red; font-size:32px;">
+                    {prediction_prob:.8f}
+                </span>
+            </div>
+            """,
             unsafe_allow_html=True
         )
 
-        # 8. Compute SHAP values
-        explainer = shap.TreeExplainer(model_xgb)
-        shap_values = explainer.shap_values(input_df)
-        shap_values = shap_values[:, :, 1]
+        if prediction_class == 1:
+            st.success(f"Predicted class: GR, probability ≥ {threshold}")
+        else:
+            st.warning(f"Predicted class: non-GR, probability < {threshold}")
 
-        # 9. Display SHAP force plot
+        # =========================
+        # 8. SHAP explanation for RF
+        # =========================
         st.subheader('SHAP Force Plot')
 
-        shap.initjs()
+        explainer = shap.TreeExplainer(model_rf)
+
+        shap_values_all = explainer.shap_values(input_df)
+
+        # =========================
+        # 8-1. Extract SHAP values of class 1
+        # =========================
+        if isinstance(shap_values_all, list):
+            # 旧版 SHAP:
+            # shap_values_all[0] -> class 0
+            # shap_values_all[1] -> class 1
+            shap_values_class1 = shap_values_all[1]
+
+        elif isinstance(shap_values_all, np.ndarray):
+            if shap_values_all.ndim == 3:
+                # 新版 SHAP:
+                # shape = samples × features × classes
+                shap_values_class1 = shap_values_all[:, :, 1]
+            elif shap_values_all.ndim == 2:
+                shap_values_class1 = shap_values_all
+            else:
+                raise ValueError(
+                    f"Unexpected SHAP values shape: {shap_values_all.shape}"
+                )
+        else:
+            raise TypeError("Unsupported SHAP values type.")
+
+        # =========================
+        # 8-2. Extract expected value of class 1
+        # =========================
+        expected_value = explainer.expected_value
+
+        if isinstance(expected_value, list):
+            expected_value_class1 = expected_value[1]
+
+        elif isinstance(expected_value, np.ndarray):
+            if expected_value.ndim == 1 and len(expected_value) == 2:
+                expected_value_class1 = expected_value[1]
+            else:
+                expected_value_class1 = expected_value
+
+        else:
+            expected_value_class1 = expected_value
+
+        # =========================
+        # 9. Draw SHAP force plot
+        # =========================
+        plt.figure()
 
         shap.force_plot(
-            explainer.expected_value,
-            shap_values[0],
+            expected_value_class1,
+            shap_values_class1[0, :],
             input_df.iloc[0, :],
             feature_names=feature_label,
             matplotlib=True,
@@ -146,10 +199,36 @@ if st.sidebar.button('Predict'):
             show=False
         )
 
-        plt.savefig("shap_force_plot.png", bbox_inches='tight', dpi=120)
+        plt.savefig(
+            "shap_force_plot_RF.png",
+            bbox_inches='tight',
+            dpi=150
+        )
+
         plt.close()
 
-        st.image("shap_force_plot.png")
+        st.image("shap_force_plot_RF.png")
+
+        # =========================
+        # 10. Optional: show feature contribution table
+        # =========================
+        shap_contribution_df = pd.DataFrame({
+            "Feature": feature_label,
+            "Value": input_df.iloc[0, :].values,
+            "SHAP value": shap_values_class1[0, :]
+        })
+
+        shap_contribution_df["Abs SHAP value"] = np.abs(
+            shap_contribution_df["SHAP value"]
+        )
+
+        shap_contribution_df = shap_contribution_df.sort_values(
+            by="Abs SHAP value",
+            ascending=False
+        )
+
+        st.subheader("SHAP Feature Contribution")
+        st.dataframe(shap_contribution_df)
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
