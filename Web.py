@@ -144,10 +144,6 @@ if st.sidebar.button('Predict'):
             unsafe_allow_html=True
         )
 
-        if prediction_class == 1:
-            st.success(f"Predicted class: GR, probability ≥ {threshold}")
-        else:
-            st.warning(f"Predicted class: non-GR, probability < {threshold}")
 
         # =========================
         # 8. SHAP explanation for RF
