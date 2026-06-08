@@ -7,7 +7,7 @@ import xgboost as xgb
 import matplotlib.pyplot as plt
 
 # 1. Load model
-model_xgb = joblib.load('XGBoost.pkl')
+model_xgb = joblib.load('RF.pkl')
 
 # 2. Configure feature names
 # 特征顺序必须与模型训练时完全一致
@@ -129,6 +129,7 @@ if st.sidebar.button('Predict'):
         # 8. Compute SHAP values
         explainer = shap.TreeExplainer(model_xgb)
         shap_values = explainer.shap_values(input_df)
+        shap_values = shap_values[:, :, 1]
 
         # 9. Display SHAP force plot
         st.subheader('SHAP Force Plot')
